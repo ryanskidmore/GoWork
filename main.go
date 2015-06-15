@@ -2,6 +2,7 @@ package gowork
 
 import (
 	"code.google.com/p/go-uuid/uuid"
+	"encoding/json"
 	"errors"
 	"github.com/oleiade/lane"
 	"gopkg.in/mgo.v2"
@@ -19,6 +20,14 @@ type WorkServer struct {
 	Tables          *DatabaseTables
 	Queue           *lane.Queue
 	WorkResultChan  chan *WorkResult
+}
+
+type LocalWorker struct {
+	PresharedSecret             string
+	Id                          string `json:"Id"`
+	SessionAuthenticationKey    string
+	VerificationString          string `json:"Verification"`
+	EncryptedVerificationString string `json:"EncryptedVerification"`
 }
 
 type DatabaseTables struct {
@@ -58,19 +67,40 @@ func NewServer(Secret string, Session *mgo.Session, Tables *DatabaseTables) *Wor
 	return WorkServerInst
 }
 
+func NewWorker(Secret string, JSONToken string) (*LocalWorker, error) {
+	LW := &LocalWorker{}
+	LW.PresharedSecret = Secret
+	err := json.Unmarshal([]byte(JSONToken), &LW)
+	if err != nil {
+		return &LocalWorker{}, errors.New("Failed to unmarshal token into register token:" + err.Error())
+	}
+	EncryptedVerification, err := encrypt([]byte(LW.PresharedSecret), []byte(LW.VerificationString))
+	if err != nil {
+		return &LocalWorker{}, errors.New("Failed to encrypt verification string:" + err.Error())
+	}
+	LW.EncryptedVerificationString = string(EncryptedVerification)
+	return LW, nil
+}
+
 func CreateWork(WorkJSON string) *Work {
+	NewWork := &Work{}
 	ObjID := bson.NewObjectId()
-	return &Work{ObjID, ObjID.Hex(), WorkJSON, time.Now()}
+	NewWork.IdHex = ObjID.Hex()
+	NewWork.Timestamp = time.Now()
+	NewWork.WorkJSON = WorkJSON
+	return NewWork
 }
 
 func (ws WorkServer) AddWork(w *Work) error {
 	LocalWork := w
 	LocalWork.Timestamp = time.Now()
-	err := ws.Tables.WorkQueue.Insert(LocalWork)
+	LocalWorkMongo := LocalWork
+	LocalWorkMongo.Id = bson.ObjectIdHex(LocalWorkMongo.IdHex)
+	err := ws.Tables.WorkQueue.Insert(LocalWorkMongo)
 	if err != nil {
 		return errors.New("Could not insert work into MongoDB:" + err.Error())
 	} else {
-		ws.Queue.Enqueue(w)
+		ws.Queue.Enqueue(LocalWork)
 	}
 	return nil
 }
@@ -108,6 +138,10 @@ func AddResultToDB(wrc chan *WorkResult, ws *WorkServer) {
 	}
 }
 
+func (ws WorkServer) GetQueueSize() int {
+	return ws.Queue.Size()
+}
+
 func (ws WorkServer) WorkerRegister() string {
 	NewWorker := &Worker{}
 	NumWorkers = NumWorkers + 1
@@ -126,15 +160,47 @@ func (ws WorkServer) WorkerVerify(Id string, EncryptedVerification string) (stri
 		DecryptedVerification, err := decrypt([]byte(ws.PresharedSecret), []byte(EncryptedVerification))
 		if err != nil {
 			return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
+		}
+		if WorkersRegistrations[IdInt].VerificationString == string(DecryptedVerification) {
+			WorkersRegistrations[IdInt].Registered = true
+			WorkersRegistrations[IdInt].SessionAuthenticationKey = uuid.New()
+			return WorkersRegistrations[IdInt].SessionAuthenticationKey, nil
 		} else {
-			if WorkersRegistrations[IdInt].VerificationString == string(DecryptedVerification) {
-				WorkersRegistrations[IdInt].Registered = true
-				WorkersRegistrations[IdInt].SessionAuthenticationKey = uuid.New()
-				return WorkersRegistrations[IdInt].SessionAuthenticationKey, nil
-			}
+			return "", errors.New("Client key incorrect")
 		}
 	}
 	return "", nil
 }
 
-// CLIENT FUNCTIONS
+func (lw LocalWorker) SetAuthKey(SessionAuthenticationKey string) {
+	lw.SessionAuthenticationKey = SessionAuthenticationKey
+}
+
+func (lw LocalWorker) GetAuthKey() string {
+	return lw.SessionAuthenticationKey
+}
+
+func (lw LocalWorker) GetWork(WorkJSON string) (*Work, map[string]interface{}, error) { // *Work, map[string]interface{}, error
+	WorkObj := &Work{}
+	WorkParams := make(map[string]interface{})
+	err := json.Unmarshal([]byte(WorkJSON), &WorkObj)
+	if err != nil {
+		return &Work{}, WorkParams, errors.New("Failed to unmarshal Work JSON:" + err.Error())
+	}
+	WorkObj.Id = bson.ObjectIdHex(WorkObj.IdHex)
+	err = json.Unmarshal([]byte(WorkObj.WorkJSON), &WorkParams)
+	if err != nil {
+		return &Work{}, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
+	}
+	return WorkObj, WorkParams, nil
+}
+
+func (lw LocalWorker) UpdateWork(OriginalWork *Work, ResultJSON string, Error string) *WorkResult {
+	Result := &WorkResult{}
+	Result.Id = OriginalWork.Id
+	Result.IdHex = OriginalWork.IdHex
+	Result.WorkObject = OriginalWork
+	Result.ResultJSON = ResultJSON
+	Result.Error = Error
+	return Result
+}
