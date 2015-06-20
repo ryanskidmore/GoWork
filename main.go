@@ -172,14 +172,6 @@ func (ws WorkServer) WorkerVerify(Id string, EncryptedVerification string) (stri
 	return "", nil
 }
 
-func (lw LocalWorker) SetAuthKey(SessionAuthenticationKey string) {
-	lw.SessionAuthenticationKey = SessionAuthenticationKey
-}
-
-func (lw LocalWorker) GetAuthKey() string {
-	return lw.SessionAuthenticationKey
-}
-
 func (lw LocalWorker) GetWork(WorkJSON string) (*Work, map[string]interface{}, error) { // *Work, map[string]interface{}, error
 	WorkObj := &Work{}
 	WorkParams := make(map[string]interface{})
