@@ -5,194 +5,218 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/oleiade/lane"
-	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"strconv"
 	"time"
 )
 
-var WorkersRegistrations map[int]*Worker
-var NumWorkers int
+// TODO
+
+// Timeouts
 
 type WorkServer struct {
+	Queue    *lane.Queue
+	Handlers map[string]interface{}
+	Workers  *WorkersStruct
+}
+
+type WorkersStruct struct {
+	Members         map[int]*Worker
 	PresharedSecret string
-	MongoSession    *mgo.Session
-	Tables          *DatabaseTables
-	Queue           *lane.Queue
-	WorkResultChan  chan *WorkResult
-}
-
-type LocalWorker struct {
-	PresharedSecret             string
-	Id                          string `json:"Id"`
-	SessionAuthenticationKey    string
-	VerificationString          string `json:"Verification"`
-	EncryptedVerificationString string `json:"EncryptedVerification"`
-}
-
-type DatabaseTables struct {
-	WorkQueue     *mgo.Collection
-	CompletedWork *mgo.Collection
+	WorkerCount     int
 }
 
 type Worker struct {
-	Id                       int
-	VerificationString       string
+	Id                       int `json:"Id"`
 	Registered               bool
-	SessionAuthenticationKey string
+	PresharedSecret          string
+	SessionAuthenticationKey string `json:"SessionAuthenticationKey"`
+	Verification             *ClientTest
+}
+
+type ClientTest struct {
+	PlaintextVerification string `json:"Verification"`
+	ClientResponse        string `json:"Response"`
 }
 
 type Work struct {
-	Id        bson.ObjectId "_id"
-	IdHex     string
-	WorkJSON  string
-	Timestamp time.Time
+	Id       bson.ObjectId "_id"
+	IdHex    string
+	WorkJSON string
+	Result   *WorkResult
+	Time     *TimeStats
 }
 
 type WorkResult struct {
-	Id         bson.ObjectId "_id"
-	IdHex      string
-	WorkObject *Work
 	ResultJSON string
+	Status     string
 	Error      string
 }
 
-func NewServer(Secret string, Session *mgo.Session, Tables *DatabaseTables) *WorkServer {
-	WorkQueue := lane.NewQueue()
-	WorkersRegistrations = make(map[int]*Worker)
-	NumWorkers = 0
-	ResultChan := make(chan *WorkResult)
-	WorkServerInst := &WorkServer{Secret, Session, Tables, WorkQueue, ResultChan}
-	go AddResultToDB(WorkServerInst.WorkResultChan, WorkServerInst)
+type TimeStats struct {
+	Added    int64
+	Recieved int64
+	Complete int64
+}
+
+type Event struct {
+	Work   *Work
+	Worker *Worker
+	Error  string
+	Time   int64
+}
+
+func NewServer(Secret string) *WorkServer {
+	Queue := lane.NewQueue()
+	WorkerMembers := make(map[int]*Worker)
+	Workers := &WorkersStruct{WorkerMembers, Secret, 0}
+	HandlerFuncs := make(map[string]interface{})
+	WorkServerInst := &WorkServer{Queue, HandlerFuncs, Workers}
 	return WorkServerInst
 }
 
-func NewWorker(Secret string, JSONToken string) (*LocalWorker, error) {
-	LW := &LocalWorker{}
-	LW.PresharedSecret = Secret
-	err := json.Unmarshal([]byte(JSONToken), &LW)
-	if err != nil {
-		return &LocalWorker{}, errors.New("Failed to unmarshal token into register token:" + err.Error())
-	}
-	EncryptedVerification, err := encrypt([]byte(LW.PresharedSecret), []byte(LW.VerificationString))
-	if err != nil {
-		return &LocalWorker{}, errors.New("Failed to encrypt verification string:" + err.Error())
-	}
-	LW.EncryptedVerificationString = string(EncryptedVerification)
-	return LW, nil
-}
-
-func CreateWork(WorkJSON string) *Work {
-	NewWork := &Work{}
-	ObjID := bson.NewObjectId()
-	NewWork.IdHex = ObjID.Hex()
-	NewWork.Timestamp = time.Now()
-	NewWork.WorkJSON = WorkJSON
-	return NewWork
-}
-
-func (ws WorkServer) AddWork(w *Work) error {
-	LocalWork := w
-	LocalWork.Timestamp = time.Now()
-	LocalWorkMongo := LocalWork
-	LocalWorkMongo.Id = bson.ObjectIdHex(LocalWorkMongo.IdHex)
-	err := ws.Tables.WorkQueue.Insert(LocalWorkMongo)
-	if err != nil {
-		return errors.New("Could not insert work into MongoDB:" + err.Error())
+func (ws WorkServer) NewHandler(event_id string, hf func(*Event)) error {
+	if _, exists := ws.Handlers[event_id]; exists {
+		ws.Event("add_handler_error", &Event{Error: "HandlerExists", Time: time.Now().UTC().Unix()})
+		return errors.New("Handler already exists")
 	} else {
-		ws.Queue.Enqueue(LocalWork)
+		ws.Handlers[event_id] = hf
+		return nil
 	}
-	return nil
 }
 
-func (ws WorkServer) GetWork(Id string, AuthenticationKey string) (*Work, error) {
+func (ws WorkServer) Event(event_id string, event *Event) {
+	if handlerFunc, exists := ws.Handlers[event_id]; exists {
+		handlerFunc.(func(*Event))(event)
+	}
+}
+
+func (ws WorkServer) Add(w *Work) {
+	w.Time.Added = time.Now().UTC().Unix()
+	ws.Event("add_work", &Event{Work: w, Time: time.Now().UTC().Unix()})
+	ws.Queue.Enqueue(w)
+}
+
+func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 	IdInt, err := strconv.Atoi(Id)
 	if err != nil {
+		ws.Event("get_work_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
 		return &Work{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	}
-	if WorkersRegistrations[IdInt].SessionAuthenticationKey == AuthenticationKey {
-		WorkObj := ws.Queue.Dequeue()
-		if WorkObj != nil {
-			return WorkObj.(*Work), nil
+	} else {
+		if ws.Workers.Members[IdInt].SessionAuthenticationKey == AuthenticationKey {
+			WorkObj := ws.Queue.Dequeue()
+			if WorkObj != nil {
+				ws.Event("get_work", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
+				return WorkObj.(*Work), nil
+			} else {
+				ws.Event("get_work_empty", &Event{Error: "NoWork", Time: time.Now().UTC().Unix()})
+				return &Work{}, nil
+			}
+		} else {
+			ws.Event("get_work_error", &Event{Error: "AuthFailed", Time: time.Now().UTC().Unix()})
+			return &Work{}, errors.New("Failed authentication")
 		}
-		return &Work{}, nil
-	}
-	return &Work{}, errors.New("Failed authentication")
-}
-
-func (ws WorkServer) SubmitCompleteWork(IdHex string, ResultJSON string, Error string) {
-	WorkResultInst := &WorkResult{}
-	WorkResultInst.Id = bson.ObjectIdHex(IdHex)
-	WorkResultInst.IdHex = IdHex
-	WorkResultInst.ResultJSON = ResultJSON
-	WorkResultInst.Error = Error
-	ws.WorkResultChan <- WorkResultInst
-}
-
-func AddResultToDB(wrc chan *WorkResult, ws *WorkServer) {
-	for {
-		WorkResultInst := <-wrc
-		_ = ws.Tables.WorkQueue.FindId(WorkResultInst.Id).One(&WorkResultInst.WorkObject)
-		_ = ws.Tables.WorkQueue.RemoveId(WorkResultInst.Id)
-		_ = ws.Tables.CompletedWork.Insert(WorkResultInst)
 	}
 }
 
-func (ws WorkServer) GetQueueSize() int {
+func (ws WorkServer) Submit(w *Work, wres *WorkResult) {
+	w.Result = wres
+	w.Id = bson.ObjectIdHex(w.IdHex)
+	w.Time.Complete = time.Now().UTC().Unix()
+	ws.Event("work_complete", &Event{Work: w, Time: time.Now().UTC().Unix()})
+}
+
+func (ws WorkServer) QueueSize() int {
 	return ws.Queue.Size()
 }
 
-func (ws WorkServer) WorkerRegister() string {
+func (wrs WorkersStruct) Register(ws *WorkServer) (string, string) {
+	TempWC := wrs.WorkerCount
+	wrs.WorkerCount += 1
 	NewWorker := &Worker{}
-	NumWorkers = NumWorkers + 1
-	NewWorker.Id = NumWorkers
-	NewWorker.VerificationString = uuid.New()
+	NewWorker.Id = TempWC + 1
+	NewWorker.Verification = &ClientTest{PlaintextVerification: uuid.New()}
 	NewWorker.Registered = false
-	WorkersRegistrations[NewWorker.Id] = NewWorker
-	return "{\"Id\":\"" + strconv.Itoa(NewWorker.Id) + "\", \"Verification\":\"" + NewWorker.VerificationString + "\"}"
+	wrs.Members[NewWorker.Id] = NewWorker
+	ws.Event("worker_register", &Event{Worker: NewWorker, Time: time.Now().UTC().Unix()})
+	return strconv.Itoa(NewWorker.Id), NewWorker.Verification.PlaintextVerification
 }
 
-func (ws WorkServer) WorkerVerify(Id string, EncryptedVerification string) (string, error) {
+func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (string, error) {
 	IdInt, err := strconv.Atoi(Id)
 	if err != nil {
+		ws.Event("worker_verify_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
 		return "", errors.New("Failed to convert Worker ID string to int:" + err.Error())
 	} else {
-		DecryptedVerification, err := decrypt([]byte(ws.PresharedSecret), []byte(EncryptedVerification))
+		ClientResp, err := decrypt([]byte(wrs.PresharedSecret), []byte(Response))
 		if err != nil {
+			ws.Event("worker_verify_error", &Event{Error: "DecryptionError", Time: time.Now().UTC().Unix()})
 			return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
-		}
-		if WorkersRegistrations[IdInt].VerificationString == string(DecryptedVerification) {
-			WorkersRegistrations[IdInt].Registered = true
-			WorkersRegistrations[IdInt].SessionAuthenticationKey = uuid.New()
-			return WorkersRegistrations[IdInt].SessionAuthenticationKey, nil
 		} else {
-			return "", errors.New("Client key incorrect")
+			wrs.Members[IdInt].Verification.ClientResponse = string(ClientResp)
+			if wrs.Members[IdInt].Verification.PlaintextVerification == string(wrs.Members[IdInt].Verification.ClientResponse) {
+				wrs.Members[IdInt].Registered = true
+				wrs.Members[IdInt].SessionAuthenticationKey = uuid.New()
+				ws.Event("worker_verify", &Event{Worker: wrs.Members[IdInt], Time: time.Now().UTC().Unix()})
+				return wrs.Members[IdInt].SessionAuthenticationKey, nil
+			} else {
+				ws.Event("worker_verify_error", &Event{Error: "KeyMismatch", Time: time.Now().UTC().Unix()})
+				return "", errors.New("Client key incorrect")
+			}
 		}
 	}
+	ws.Event("worker_verify_error", &Event{Error: "UnknownError", Time: time.Now().UTC().Unix()})
 	return "", nil
 }
 
-func (lw LocalWorker) GetWork(WorkJSON string) (*Work, map[string]interface{}, error) { // *Work, map[string]interface{}, error
-	WorkObj := &Work{}
-	WorkParams := make(map[string]interface{})
-	err := json.Unmarshal([]byte(WorkJSON), &WorkObj)
+func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
+	wrk := &Worker{}
+	wrk.PresharedSecret = Secret
+	wrk.Verification = &ClientTest{PlaintextVerification: PlaintextVerification}
+	IdInt, err := strconv.Atoi(ID)
 	if err != nil {
-		return &Work{}, WorkParams, errors.New("Failed to unmarshal Work JSON:" + err.Error())
+		return &Worker{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
+	} else {
+		wrk.Id = IdInt
+		ClientResponse, err := encrypt([]byte(wrk.PresharedSecret), []byte(wrk.Verification.PlaintextVerification))
+		if err != nil {
+			return &Worker{}, errors.New("Failed to encrypt verification string:" + err.Error())
+		} else {
+			wrk.Verification.ClientResponse = string(ClientResponse)
+			return wrk, nil
+		}
 	}
-	WorkObj.Id = bson.ObjectIdHex(WorkObj.IdHex)
-	err = json.Unmarshal([]byte(WorkObj.WorkJSON), &WorkParams)
-	if err != nil {
-		return &Work{}, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
-	}
-	return WorkObj, WorkParams, nil
 }
 
-func (lw LocalWorker) UpdateWork(OriginalWork *Work, ResultJSON string, Error string) *WorkResult {
-	Result := &WorkResult{}
-	Result.Id = OriginalWork.Id
-	Result.IdHex = OriginalWork.IdHex
-	Result.WorkObject = OriginalWork
-	Result.ResultJSON = ResultJSON
-	Result.Error = Error
-	return Result
+func (wrk Worker) Get(w *Work) (*Work, map[string]interface{}, error) {
+	w.Id = bson.ObjectIdHex(w.IdHex)
+	WorkParams := make(map[string]interface{})
+	err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
+	if err != nil {
+		return &Work{}, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
+	} else {
+		w.Time.Recieved = time.Now().UTC().Unix()
+		return w, WorkParams, nil
+	}
+}
+
+func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) *Work {
+	wr := &WorkResult{}
+	wr.ResultJSON = ResultJSON
+	wr.Error = Error
+	wr.Status = "Complete"
+	w.Result = wr
+	return w
+}
+
+func CreateWork(WorkData interface{}) (*Work, error) { // allow passing of interface then marshal it
+	NewWork := &Work{}
+	NewWork.IdHex = bson.NewObjectId().Hex()
+	WorkDataJSON, err := json.Marshal(WorkData)
+	if err != nil {
+		return &Work{}, errors.New("Failed to marshal work data:" + err.Error())
+	} else {
+		NewWork.WorkJSON = string(WorkDataJSON)
+		return NewWork, nil
+	}
 }
