@@ -10,14 +10,11 @@ import (
 	"time"
 )
 
-// TODO
-
-// Timeouts
-
 type WorkServer struct {
-	Queue    *lane.Queue
-	Handlers map[string]interface{}
-	Workers  *WorkersStruct
+	Queue         *lane.Queue
+	Handlers      map[string]interface{}
+	HandlerParams map[string]interface{}
+	Workers       *WorkersStruct
 }
 
 type WorkersStruct struct {
@@ -27,10 +24,10 @@ type WorkersStruct struct {
 }
 
 type Worker struct {
-	Id                       int `json:"Id"`
+	Id                       int
 	Registered               bool
 	PresharedSecret          string
-	SessionAuthenticationKey string `json:"SessionAuthenticationKey"`
+	SessionAuthenticationKey string
 	Verification             *ClientTest
 }
 
@@ -40,7 +37,7 @@ type ClientTest struct {
 }
 
 type Work struct {
-	Id       bson.ObjectId "_id"
+	Id       bson.ObjectId `json:"-" bson:"_id"`
 	IdHex    string
 	WorkJSON string
 	Result   *WorkResult
@@ -57,6 +54,7 @@ type TimeStats struct {
 	Added    int64
 	Recieved int64
 	Complete int64
+	Timeout  int64
 }
 
 type Event struct {
@@ -66,16 +64,20 @@ type Event struct {
 	Time   int64
 }
 
-func NewServer(Secret string) *WorkServer {
+func NewServer(Secret string) (*WorkServer, error) {
+	if len(Secret) != 32 {
+		return &WorkServer{}, errors.New("Secret must be 32 characters")
+	}
 	Queue := lane.NewQueue()
 	WorkerMembers := make(map[int]*Worker)
 	Workers := &WorkersStruct{WorkerMembers, Secret, 0}
 	HandlerFuncs := make(map[string]interface{})
-	WorkServerInst := &WorkServer{Queue, HandlerFuncs, Workers}
-	return WorkServerInst
+	HandlerParams := make(map[string]interface{})
+	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
+	return WorkServerInst, nil
 }
 
-func (ws WorkServer) NewHandler(event_id string, hf func(*Event)) error {
+func (ws WorkServer) NewHandler(event_id string, hf func(*Event, map[string]interface{})) error {
 	if _, exists := ws.Handlers[event_id]; exists {
 		ws.Event("add_handler_error", &Event{Error: "HandlerExists", Time: time.Now().UTC().Unix()})
 		return errors.New("Handler already exists")
@@ -85,9 +87,14 @@ func (ws WorkServer) NewHandler(event_id string, hf func(*Event)) error {
 	}
 }
 
+func (ws WorkServer) AddParams(params map[string]interface{}) *WorkServer {
+	ws.HandlerParams = params
+	return &ws
+}
+
 func (ws WorkServer) Event(event_id string, event *Event) {
 	if handlerFunc, exists := ws.Handlers[event_id]; exists {
-		handlerFunc.(func(*Event))(event)
+		handlerFunc.(func(*Event, map[string]interface{}))(event, ws.HandlerParams)
 	}
 }
 
@@ -106,8 +113,14 @@ func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 		if ws.Workers.Members[IdInt].SessionAuthenticationKey == AuthenticationKey {
 			WorkObj := ws.Queue.Dequeue()
 			if WorkObj != nil {
-				ws.Event("get_work", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
-				return WorkObj.(*Work), nil
+				if (WorkObj.(*Work).Time.Added + WorkObj.(*Work).Time.Timeout) > time.Now().UTC().Unix() {
+					ws.Event("get_work", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
+					return WorkObj.(*Work), nil
+				} else {
+					ws.Event("work_timeout", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
+					return WorkObj.(*Work), errors.New("Work Timeout")
+				}
+
 			} else {
 				ws.Event("get_work_empty", &Event{Error: "NoWork", Time: time.Now().UTC().Unix()})
 				return &Work{}, nil
@@ -119,11 +132,15 @@ func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 	}
 }
 
-func (ws WorkServer) Submit(w *Work, wres *WorkResult) {
-	w.Result = wres
-	w.Id = bson.ObjectIdHex(w.IdHex)
-	w.Time.Complete = time.Now().UTC().Unix()
-	ws.Event("work_complete", &Event{Work: w, Time: time.Now().UTC().Unix()})
+func (ws WorkServer) Submit(w *Work) {
+	if (w.Time.Added + w.Time.Timeout) > time.Now().UTC().Unix() {
+		w.Id = bson.ObjectIdHex(w.IdHex)
+		ws.Event("work_complete", &Event{Work: w, Time: time.Now().UTC().Unix()})
+	} else {
+		w.Result.Error = "Timeout"
+		w.Result.Status = "Timeout"
+		ws.Event("work_timeout", &Event{Work: w, Time: time.Now().UTC().Unix()})
+	}
 }
 
 func (ws WorkServer) QueueSize() int {
@@ -171,6 +188,9 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 
 func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
 	wrk := &Worker{}
+	if len(Secret) != 32 {
+		return wrk, errors.New("Secret must be 32 characters")
+	}
 	wrk.PresharedSecret = Secret
 	wrk.Verification = &ClientTest{PlaintextVerification: PlaintextVerification}
 	IdInt, err := strconv.Atoi(ID)
@@ -188,30 +208,48 @@ func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker,
 	}
 }
 
-func (wrk Worker) Get(w *Work) (*Work, map[string]interface{}, error) {
-	w.Id = bson.ObjectIdHex(w.IdHex)
+func (wrk Worker) SetAuthenticationKey(key string) *Worker {
+	wrk.SessionAuthenticationKey = key
+	return &wrk
+}
+
+func (wrk Worker) Process(w *Work) (*Work, map[string]interface{}, error) {
 	WorkParams := make(map[string]interface{})
-	err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
-	if err != nil {
-		return &Work{}, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
+	if (w.Time.Added + w.Time.Timeout) > time.Now().UTC().Unix() {
+		err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
+		if err != nil {
+			return w, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
+		} else {
+			w.Time.Recieved = time.Now().UTC().Unix()
+			return w, WorkParams, nil
+		}
 	} else {
-		w.Time.Recieved = time.Now().UTC().Unix()
-		return w, WorkParams, nil
+		return w, WorkParams, errors.New("Work Timeout")
 	}
 }
 
-func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) *Work {
+func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error) {
 	wr := &WorkResult{}
 	wr.ResultJSON = ResultJSON
-	wr.Error = Error
-	wr.Status = "Complete"
-	w.Result = wr
-	return w
+	w.Time.Complete = time.Now().UTC().Unix()
+	if (w.Time.Added + w.Time.Timeout) > time.Now().UTC().Unix() {
+		wr.Error = Error
+		wr.Status = "Complete"
+		w.Result = wr
+		return w, nil
+	} else {
+		wr.Error = "Timeout"
+		wr.Status = "Timeout"
+		w.Result = wr
+		return w, errors.New("Timeout")
+	}
 }
 
-func CreateWork(WorkData interface{}) (*Work, error) { // allow passing of interface then marshal it
+func CreateWork(WorkData interface{}, Timeout int64) (*Work, error) {
 	NewWork := &Work{}
 	NewWork.IdHex = bson.NewObjectId().Hex()
+	NewWork.Result = &WorkResult{"", "Pending", ""}
+	NewWork.Time = &TimeStats{Timeout: Timeout}
 	WorkDataJSON, err := json.Marshal(WorkData)
 	if err != nil {
 		return &Work{}, errors.New("Failed to marshal work data:" + err.Error())
@@ -219,4 +257,15 @@ func CreateWork(WorkData interface{}) (*Work, error) { // allow passing of inter
 		NewWork.WorkJSON = string(WorkDataJSON)
 		return NewWork, nil
 	}
+}
+
+func (w Work) Marshal() string {
+	MarshalledWork, _ := json.Marshal(w)
+	return string(MarshalledWork)
+}
+
+func Unmarshal(w string) *Work {
+	WorkObject := &Work{}
+	_ = json.Unmarshal([]byte(w), &WorkObject)
+	return WorkObject
 }
