@@ -1,13 +1,14 @@
 package gowork
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
-	"github.com/oleiade/lane"
-	"gopkg.in/mgo.v2/bson"
 	"strconv"
 	"time"
+
+	"code.google.com/p/go-uuid/uuid"
+	"github.com/oleiade/lane"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type WorkServer struct {
