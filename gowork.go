@@ -90,6 +90,19 @@ func NewServer(Secret string) (*WorkServer, error) {
 	return WorkServerInst, nil
 }
 
+func MustNewServer(Secret string) *WorkServer {
+	if len(Secret) != 32 {
+		panic("Secret must be 32 characters")
+	}
+	Queue := lane.NewQueue()
+	WorkerMembers := make(map[int]*Worker)
+	Workers := &WorkersStruct{WorkerMembers, Secret, 0}
+	HandlerFuncs := make(map[string]func(*Event, map[string]interface{}))
+	HandlerParams := make(map[string]interface{})
+	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
+	return WorkServerInst
+}
+
 func (ws WorkServer) NewHandler(event_id string, hf func(*Event, map[string]interface{})) error {
 	if _, exists := ws.Handlers[event_id]; exists {
 		ws.Event("add_handler_error", NewEventError("HandlerExists"))
