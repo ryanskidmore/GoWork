@@ -3,11 +3,12 @@ package gowork
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
+	"time"
+
 	"github.com/oleiade/lane"
 	"github.com/satori/go.uuid"
 	"gopkg.in/mgo.v2/bson"
-	"strconv"
-	"time"
 )
 
 type WorkServer struct {
@@ -64,6 +65,18 @@ type Event struct {
 	Time   int64
 }
 
+func NewEventError(msg string) *Event {
+	return &Event{Error: msg, Time: time.Now().UTC().Unix()}
+}
+
+func NewEventWork(w *Work) *Event {
+	return &Event{Work: w, Time: time.Now().UTC().Unix()}
+}
+
+func NewEventWorker(w *Worker) *Event {
+	return &Event{Worker: w, Time: time.Now().UTC().Unix()}
+}
+
 func NewServer(Secret string) (*WorkServer, error) {
 	if len(Secret) != 32 {
 		return &WorkServer{}, errors.New("Secret must be 32 characters")
@@ -79,12 +92,11 @@ func NewServer(Secret string) (*WorkServer, error) {
 
 func (ws WorkServer) NewHandler(event_id string, hf func(*Event, map[string]interface{})) error {
 	if _, exists := ws.Handlers[event_id]; exists {
-		ws.Event("add_handler_error", &Event{Error: "HandlerExists", Time: time.Now().UTC().Unix()})
+		ws.Event("add_handler_error", NewEventError("HandlerExists"))
 		return errors.New("Handler already exists")
-	} else {
-		ws.Handlers[event_id] = hf
-		return nil
 	}
+	ws.Handlers[event_id] = hf
+	return nil
 }
 
 func (ws WorkServer) AddParams(params map[string]interface{}) *WorkServer {
@@ -100,47 +112,42 @@ func (ws WorkServer) Event(event_id string, event *Event) {
 
 func (ws WorkServer) Add(w *Work) {
 	w.Time.Added = time.Now().UTC().Unix()
-	ws.Event("add_work", &Event{Work: w, Time: time.Now().UTC().Unix()})
+	ws.Event("add_work", NewEventWork(w))
 	ws.Queue.Enqueue(w)
 }
 
 func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 	IdInt, err := strconv.Atoi(Id)
 	if err != nil {
-		ws.Event("get_work_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
+		ws.Event("get_work_error", NewEventError("StrconvError"))
 		return &Work{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	} else {
-		if ws.Workers.Members[IdInt].SessionAuthenticationKey == AuthenticationKey {
-			WorkObj := ws.Queue.Dequeue()
-			if WorkObj != nil {
-				if (WorkObj.(*Work).Time.Added + WorkObj.(*Work).Time.Timeout) > time.Now().UTC().Unix() {
-					ws.Event("get_work", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
-					return WorkObj.(*Work), nil
-				} else {
-					ws.Event("work_timeout", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
-					return WorkObj.(*Work), errors.New("Work Timeout")
-				}
-
-			} else {
-				ws.Event("get_work_empty", &Event{Error: "NoWork", Time: time.Now().UTC().Unix()})
-				return &Work{}, nil
-			}
-		} else {
-			ws.Event("get_work_error", &Event{Error: "AuthFailed", Time: time.Now().UTC().Unix()})
-			return &Work{}, errors.New("Failed authentication")
-		}
 	}
+	if ws.Workers.Members[IdInt].SessionAuthenticationKey != AuthenticationKey {
+		ws.Event("get_work_error", NewEventError("AuthFailed"))
+		return &Work{}, errors.New("Failed authentication")
+	}
+	WorkObj := ws.Queue.Dequeue()
+	if WorkObj == nil {
+		ws.Event("get_work_empty", NewEventError("NoWork"))
+		return &Work{}, nil
+	}
+	if (WorkObj.(*Work).Time.Added + WorkObj.(*Work).Time.Timeout) > time.Now().UTC().Unix() {
+		ws.Event("get_work", NewEventWork(WorkObj.(*Work)))
+		return WorkObj.(*Work), nil
+	}
+	ws.Event("work_timeout", NewEventWork(WorkObj.(*Work)))
+	return WorkObj.(*Work), errors.New("Work Timeout")
 }
 
 func (ws WorkServer) Submit(w *Work) {
-	if (w.Time.Added + w.Time.Timeout) > time.Now().UTC().Unix() {
-		w.Id = bson.ObjectIdHex(w.IdHex)
-		ws.Event("work_complete", &Event{Work: w, Time: time.Now().UTC().Unix()})
-	} else {
+	if (w.Time.Added + w.Time.Timeout) <= time.Now().UTC().Unix() {
 		w.Result.Error = "Timeout"
 		w.Result.Status = "Timeout"
-		ws.Event("work_timeout", &Event{Work: w, Time: time.Now().UTC().Unix()})
+		ws.Event("work_timeout", NewEventWork(w))
+		return
 	}
+	w.Id = bson.ObjectIdHex(w.IdHex)
+	ws.Event("work_complete", NewEventWork(w))
 }
 
 func (ws WorkServer) QueueSize() int {
@@ -150,40 +157,36 @@ func (ws WorkServer) QueueSize() int {
 func (wrs WorkersStruct) Register(ws *WorkServer) (string, string) {
 	TempWC := wrs.WorkerCount
 	wrs.WorkerCount += 1
-	NewWorker := &Worker{}
-	NewWorker.Id = TempWC + 1
-	NewWorker.Verification = &ClientTest{PlaintextVerification: uuid.NewV4().String()}
-	NewWorker.Registered = false
-	wrs.Members[NewWorker.Id] = NewWorker
-	ws.Event("worker_register", &Event{Worker: NewWorker, Time: time.Now().UTC().Unix()})
-	return strconv.Itoa(NewWorker.Id), NewWorker.Verification.PlaintextVerification
+	w := &Worker{
+		Id:           TempWC + 1,
+		Verification: &ClientTest{PlaintextVerification: uuid.NewV4().String()},
+		Registered:   false,
+	}
+	wrs.Members[w.Id] = w
+	ws.Event("worker_register", NewEventWorker(w))
+	return strconv.Itoa(w.Id), w.Verification.PlaintextVerification
 }
 
 func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (string, error) {
 	IdInt, err := strconv.Atoi(Id)
 	if err != nil {
-		ws.Event("worker_verify_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
+		ws.Event("worker_verify_error", NewEventError("StrconvError"))
 		return "", errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	} else {
-		ClientResp, err := decrypt([]byte(wrs.PresharedSecret), []byte(Response))
-		if err != nil {
-			ws.Event("worker_verify_error", &Event{Error: "DecryptionError", Time: time.Now().UTC().Unix()})
-			return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
-		} else {
-			wrs.Members[IdInt].Verification.ClientResponse = string(ClientResp)
-			if wrs.Members[IdInt].Verification.PlaintextVerification == string(wrs.Members[IdInt].Verification.ClientResponse) {
-				wrs.Members[IdInt].Registered = true
-				wrs.Members[IdInt].SessionAuthenticationKey = uuid.NewV4().String()
-				ws.Event("worker_verify", &Event{Worker: wrs.Members[IdInt], Time: time.Now().UTC().Unix()})
-				return wrs.Members[IdInt].SessionAuthenticationKey, nil
-			} else {
-				ws.Event("worker_verify_error", &Event{Error: "KeyMismatch", Time: time.Now().UTC().Unix()})
-				return "", errors.New("Client key incorrect")
-			}
-		}
 	}
-	ws.Event("worker_verify_error", &Event{Error: "UnknownError", Time: time.Now().UTC().Unix()})
-	return "", nil
+	ClientResp, err := decrypt([]byte(wrs.PresharedSecret), []byte(Response))
+	if err != nil {
+		ws.Event("worker_verify_error", NewEventError("DecryptionError"))
+		return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
+	}
+	wrs.Members[IdInt].Verification.ClientResponse = string(ClientResp)
+	if wrs.Members[IdInt].Verification.PlaintextVerification != string(wrs.Members[IdInt].Verification.ClientResponse) {
+		ws.Event("worker_verify_error", NewEventError("KeyMismatch"))
+		return "", errors.New("Client key incorrect")
+	}
+	wrs.Members[IdInt].Registered = true
+	wrs.Members[IdInt].SessionAuthenticationKey = uuid.NewV4().String()
+	ws.Event("worker_verify", NewEventWorker(wrs.Members[IdInt]))
+	return wrs.Members[IdInt].SessionAuthenticationKey, nil
 }
 
 func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
@@ -196,16 +199,14 @@ func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker,
 	IdInt, err := strconv.Atoi(ID)
 	if err != nil {
 		return &Worker{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	} else {
-		wrk.Id = IdInt
-		ClientResponse, err := encrypt([]byte(wrk.PresharedSecret), []byte(wrk.Verification.PlaintextVerification))
-		if err != nil {
-			return &Worker{}, errors.New("Failed to encrypt verification string:" + err.Error())
-		} else {
-			wrk.Verification.ClientResponse = string(ClientResponse)
-			return wrk, nil
-		}
 	}
+	wrk.Id = IdInt
+	ClientResponse, err := encrypt([]byte(wrk.PresharedSecret), []byte(wrk.Verification.PlaintextVerification))
+	if err != nil {
+		return &Worker{}, errors.New("Failed to encrypt verification string:" + err.Error())
+	}
+	wrk.Verification.ClientResponse = string(ClientResponse)
+	return wrk, nil
 }
 
 func (wrk Worker) SetAuthenticationKey(key string) *Worker {
@@ -215,17 +216,15 @@ func (wrk Worker) SetAuthenticationKey(key string) *Worker {
 
 func (wrk Worker) Process(w *Work) (*Work, map[string]interface{}, error) {
 	WorkParams := make(map[string]interface{})
-	if (w.Time.Added + w.Time.Timeout) > time.Now().UTC().Unix() {
-		err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
-		if err != nil {
-			return w, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
-		} else {
-			w.Time.Recieved = time.Now().UTC().Unix()
-			return w, WorkParams, nil
-		}
-	} else {
+	if (w.Time.Added + w.Time.Timeout) <= time.Now().UTC().Unix() {
 		return w, WorkParams, errors.New("Work Timeout")
 	}
+	err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
+	if err != nil {
+		return w, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
+	}
+	w.Time.Recieved = time.Now().UTC().Unix()
+	return w, WorkParams, nil
 }
 
 func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error) {
@@ -237,12 +236,11 @@ func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error
 		wr.Status = "Complete"
 		w.Result = wr
 		return w, nil
-	} else {
-		wr.Error = "Timeout"
-		wr.Status = "Timeout"
-		w.Result = wr
-		return w, errors.New("Timeout")
 	}
+	wr.Error = "Timeout"
+	wr.Status = "Timeout"
+	w.Result = wr
+	return w, errors.New("Timeout")
 }
 
 func CreateWork(WorkData interface{}, Timeout int64) (*Work, error) {
@@ -253,10 +251,9 @@ func CreateWork(WorkData interface{}, Timeout int64) (*Work, error) {
 	WorkDataJSON, err := json.Marshal(WorkData)
 	if err != nil {
 		return &Work{}, errors.New("Failed to marshal work data:" + err.Error())
-	} else {
-		NewWork.WorkJSON = string(WorkDataJSON)
-		return NewWork, nil
 	}
+	NewWork.WorkJSON = string(WorkDataJSON)
+	return NewWork, nil
 }
 
 func (w Work) Marshal() string {
