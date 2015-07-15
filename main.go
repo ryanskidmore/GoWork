@@ -81,10 +81,9 @@ func (ws WorkServer) NewHandler(event_id string, hf func(*Event, map[string]inte
 	if _, exists := ws.Handlers[event_id]; exists {
 		ws.Event("add_handler_error", &Event{Error: "HandlerExists", Time: time.Now().UTC().Unix()})
 		return errors.New("Handler already exists")
-	} else {
-		ws.Handlers[event_id] = hf
-		return nil
 	}
+	ws.Handlers[event_id] = hf
+	return nil
 }
 
 func (ws WorkServer) AddParams(params map[string]interface{}) *WorkServer {
@@ -109,27 +108,22 @@ func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 	if err != nil {
 		ws.Event("get_work_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
 		return &Work{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	} else {
-		if ws.Workers.Members[IdInt].SessionAuthenticationKey == AuthenticationKey {
-			WorkObj := ws.Queue.Dequeue()
-			if WorkObj != nil {
-				if (WorkObj.(*Work).Time.Added + WorkObj.(*Work).Time.Timeout) > time.Now().UTC().Unix() {
-					ws.Event("get_work", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
-					return WorkObj.(*Work), nil
-				} else {
-					ws.Event("work_timeout", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
-					return WorkObj.(*Work), errors.New("Work Timeout")
-				}
-
-			} else {
-				ws.Event("get_work_empty", &Event{Error: "NoWork", Time: time.Now().UTC().Unix()})
-				return &Work{}, nil
-			}
-		} else {
-			ws.Event("get_work_error", &Event{Error: "AuthFailed", Time: time.Now().UTC().Unix()})
-			return &Work{}, errors.New("Failed authentication")
-		}
 	}
+	if ws.Workers.Members[IdInt].SessionAuthenticationKey != AuthenticationKey {
+		ws.Event("get_work_error", &Event{Error: "AuthFailed", Time: time.Now().UTC().Unix()})
+		return &Work{}, errors.New("Failed authentication")
+	}
+	WorkObj := ws.Queue.Dequeue()
+	if WorkObj == nil {
+		ws.Event("get_work_empty", &Event{Error: "NoWork", Time: time.Now().UTC().Unix()})
+		return &Work{}, nil
+	}
+	if (WorkObj.(*Work).Time.Added + WorkObj.(*Work).Time.Timeout) > time.Now().UTC().Unix() {
+		ws.Event("get_work", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
+		return WorkObj.(*Work), nil
+	}
+	ws.Event("work_timeout", &Event{Work: WorkObj.(*Work), Time: time.Now().UTC().Unix()})
+	return WorkObj.(*Work), errors.New("Work Timeout")
 }
 
 func (ws WorkServer) Submit(w *Work) {
@@ -164,26 +158,21 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 	if err != nil {
 		ws.Event("worker_verify_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
 		return "", errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	} else {
-		ClientResp, err := decrypt([]byte(wrs.PresharedSecret), []byte(Response))
-		if err != nil {
-			ws.Event("worker_verify_error", &Event{Error: "DecryptionError", Time: time.Now().UTC().Unix()})
-			return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
-		} else {
-			wrs.Members[IdInt].Verification.ClientResponse = string(ClientResp)
-			if wrs.Members[IdInt].Verification.PlaintextVerification == string(wrs.Members[IdInt].Verification.ClientResponse) {
-				wrs.Members[IdInt].Registered = true
-				wrs.Members[IdInt].SessionAuthenticationKey = uuid.New()
-				ws.Event("worker_verify", &Event{Worker: wrs.Members[IdInt], Time: time.Now().UTC().Unix()})
-				return wrs.Members[IdInt].SessionAuthenticationKey, nil
-			} else {
-				ws.Event("worker_verify_error", &Event{Error: "KeyMismatch", Time: time.Now().UTC().Unix()})
-				return "", errors.New("Client key incorrect")
-			}
-		}
 	}
-	ws.Event("worker_verify_error", &Event{Error: "UnknownError", Time: time.Now().UTC().Unix()})
-	return "", nil
+	ClientResp, err := decrypt([]byte(wrs.PresharedSecret), []byte(Response))
+	if err != nil {
+		ws.Event("worker_verify_error", &Event{Error: "DecryptionError", Time: time.Now().UTC().Unix()})
+		return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
+	}
+	wrs.Members[IdInt].Verification.ClientResponse = string(ClientResp)
+	if wrs.Members[IdInt].Verification.PlaintextVerification != string(wrs.Members[IdInt].Verification.ClientResponse) {
+		ws.Event("worker_verify_error", &Event{Error: "KeyMismatch", Time: time.Now().UTC().Unix()})
+		return "", errors.New("Client key incorrect")
+	}
+	wrs.Members[IdInt].Registered = true
+	wrs.Members[IdInt].SessionAuthenticationKey = uuid.New()
+	ws.Event("worker_verify", &Event{Worker: wrs.Members[IdInt], Time: time.Now().UTC().Unix()})
+	return wrs.Members[IdInt].SessionAuthenticationKey, nil
 }
 
 func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
@@ -196,16 +185,14 @@ func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker,
 	IdInt, err := strconv.Atoi(ID)
 	if err != nil {
 		return &Worker{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
-	} else {
-		wrk.Id = IdInt
-		ClientResponse, err := encrypt([]byte(wrk.PresharedSecret), []byte(wrk.Verification.PlaintextVerification))
-		if err != nil {
-			return &Worker{}, errors.New("Failed to encrypt verification string:" + err.Error())
-		} else {
-			wrk.Verification.ClientResponse = string(ClientResponse)
-			return wrk, nil
-		}
 	}
+	wrk.Id = IdInt
+	ClientResponse, err := encrypt([]byte(wrk.PresharedSecret), []byte(wrk.Verification.PlaintextVerification))
+	if err != nil {
+		return &Worker{}, errors.New("Failed to encrypt verification string:" + err.Error())
+	}
+	wrk.Verification.ClientResponse = string(ClientResponse)
+	return wrk, nil
 }
 
 func (wrk Worker) SetAuthenticationKey(key string) *Worker {
@@ -215,17 +202,15 @@ func (wrk Worker) SetAuthenticationKey(key string) *Worker {
 
 func (wrk Worker) Process(w *Work) (*Work, map[string]interface{}, error) {
 	WorkParams := make(map[string]interface{})
-	if (w.Time.Added + w.Time.Timeout) > time.Now().UTC().Unix() {
-		err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
-		if err != nil {
-			return w, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
-		} else {
-			w.Time.Recieved = time.Now().UTC().Unix()
-			return w, WorkParams, nil
-		}
-	} else {
+	if (w.Time.Added + w.Time.Timeout) <= time.Now().UTC().Unix() {
 		return w, WorkParams, errors.New("Work Timeout")
 	}
+	err := json.Unmarshal([]byte(w.WorkJSON), &WorkParams)
+	if err != nil {
+		return w, WorkParams, errors.New("Failed to unmarshal Work Params JSON:" + err.Error())
+	}
+	w.Time.Recieved = time.Now().UTC().Unix()
+	return w, WorkParams, nil
 }
 
 func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error) {
@@ -237,12 +222,11 @@ func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error
 		wr.Status = "Complete"
 		w.Result = wr
 		return w, nil
-	} else {
-		wr.Error = "Timeout"
-		wr.Status = "Timeout"
-		w.Result = wr
-		return w, errors.New("Timeout")
 	}
+	wr.Error = "Timeout"
+	wr.Status = "Timeout"
+	w.Result = wr
+	return w, errors.New("Timeout")
 }
 
 func CreateWork(WorkData interface{}, Timeout int64) (*Work, error) {
@@ -253,10 +237,9 @@ func CreateWork(WorkData interface{}, Timeout int64) (*Work, error) {
 	WorkDataJSON, err := json.Marshal(WorkData)
 	if err != nil {
 		return &Work{}, errors.New("Failed to marshal work data:" + err.Error())
-	} else {
-		NewWork.WorkJSON = string(WorkDataJSON)
-		return NewWork, nil
 	}
+	NewWork.WorkJSON = string(WorkDataJSON)
+	return NewWork, nil
 }
 
 func (w Work) Marshal() string {
