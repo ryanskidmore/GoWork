@@ -44,7 +44,7 @@ This function will only return an error when the handler already exists, so in m
 
 Now work can be created and added.
 ```go
-w, err := gowork.CreateWork(WorkData interface{}, Timeout int(64))
+w, err := gowork.CreateWork(WorkData interface{}, Timeout int64)
 ws.Add(w)
 ```
 WorkData can be anything that you want to pass to the worker. Timeout is duration in seconds in integer64 type until you want the work to Timeout.
