@@ -162,6 +162,9 @@ w, err := Worker.Submit(w, result, error)
 
 This function takes the original work object, appends the result to it (string) as well as any error (string) and returns the new work object back ready for marshalling and submission to the server. An error will be returned when the work has timed out.
 
+## Handler Functions
+A quick note on handlers, they're intended to act as middleware - so an ideal usage scenario would be adding a piece of work to a database when it's complete, for example.
+
 ## Contributors
 
 Ryan Skidmore - [github.com/ryanskidmore](http://github.com/ryanskidmore)
