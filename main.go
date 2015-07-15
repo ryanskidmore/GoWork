@@ -1,10 +1,10 @@
 package gowork
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
 	"github.com/oleiade/lane"
+	"github.com/satori/go.uuid"
 	"gopkg.in/mgo.v2/bson"
 	"strconv"
 	"time"
@@ -152,7 +152,7 @@ func (wrs WorkersStruct) Register(ws *WorkServer) (string, string) {
 	wrs.WorkerCount += 1
 	NewWorker := &Worker{}
 	NewWorker.Id = TempWC + 1
-	NewWorker.Verification = &ClientTest{PlaintextVerification: uuid.New()}
+	NewWorker.Verification = &ClientTest{PlaintextVerification: uuid.NewV4().String()}
 	NewWorker.Registered = false
 	wrs.Members[NewWorker.Id] = NewWorker
 	ws.Event("worker_register", &Event{Worker: NewWorker, Time: time.Now().UTC().Unix()})
@@ -173,7 +173,7 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 			wrs.Members[IdInt].Verification.ClientResponse = string(ClientResp)
 			if wrs.Members[IdInt].Verification.PlaintextVerification == string(wrs.Members[IdInt].Verification.ClientResponse) {
 				wrs.Members[IdInt].Registered = true
-				wrs.Members[IdInt].SessionAuthenticationKey = uuid.New()
+				wrs.Members[IdInt].SessionAuthenticationKey = uuid.NewV4().String()
 				ws.Event("worker_verify", &Event{Worker: wrs.Members[IdInt], Time: time.Now().UTC().Unix()})
 				return wrs.Members[IdInt].SessionAuthenticationKey, nil
 			} else {
