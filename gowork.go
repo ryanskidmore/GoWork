@@ -13,7 +13,7 @@ import (
 
 type WorkServer struct {
 	Queue         *lane.Queue
-	Handlers      map[string]interface{}
+	Handlers      map[string]func(*Event, map[string]interface{})
 	HandlerParams map[string]interface{}
 	Workers       *WorkersStruct
 }
@@ -84,7 +84,7 @@ func NewServer(Secret string) (*WorkServer, error) {
 	Queue := lane.NewQueue()
 	WorkerMembers := make(map[int]*Worker)
 	Workers := &WorkersStruct{WorkerMembers, Secret, 0}
-	HandlerFuncs := make(map[string]interface{})
+	HandlerFuncs := make(map[string]func(*Event, map[string]interface{}))
 	HandlerParams := make(map[string]interface{})
 	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
 	return WorkServerInst, nil
@@ -106,7 +106,7 @@ func (ws WorkServer) AddParams(params map[string]interface{}) *WorkServer {
 
 func (ws WorkServer) Event(event_id string, event *Event) {
 	if handlerFunc, exists := ws.Handlers[event_id]; exists {
-		handlerFunc.(func(*Event, map[string]interface{}))(event, ws.HandlerParams)
+		handlerFunc(event, ws.HandlerParams)
 	}
 }
 
