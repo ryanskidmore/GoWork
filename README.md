@@ -25,7 +25,7 @@ First step is to create a new work server,
 ```go
 ws, err := gowork.NewServer("32 character secret")
 ```
- Error is only returned by this function when the secret isn't 32 characters so as long as your secret is definitely 32 characters you can safely ignore the err returned by this function.
+ Error is returned when the secret isn't exactly 32 characters long.
 
 Next, you can add parameters to be passed to your handler functions, though this is entirely optional.
 ```go
