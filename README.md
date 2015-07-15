@@ -21,12 +21,14 @@ GoWork is a library for the encapsulation and delivery of Work to a distributed 
 
 #### Work
 
-First step is to create a new work server,
+Generate a secret:,
 ```go
-ws, err := gowork.NewServer("32 character secret")
+secret, err := gowork.GenerateSecret()
 ```
- Error is only returned by this function when the secret isn't 32 characters so as long as your secret is definitely 32 characters you can safely ignore the err returned by this function.
-
+Then create a new work server,
+```go
+ws, err := gowork.NewServer(secret)
+```
 Next, you can add parameters to be passed to your handler functions, though this is entirely optional.
 ```go
 ws = ws.AddParams(map[string]interface{}{"param1":"value1"})

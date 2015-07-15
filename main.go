@@ -1,13 +1,15 @@
 package gowork
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
-	"github.com/oleiade/lane"
-	"gopkg.in/mgo.v2/bson"
 	"strconv"
 	"time"
+
+	"code.google.com/p/go-uuid/uuid"
+	"github.com/oleiade/lane"
+	"github.com/peter-edge/go-encrypt"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type WorkServer struct {
@@ -18,15 +20,15 @@ type WorkServer struct {
 }
 
 type WorkersStruct struct {
-	Members         map[int]*Worker
-	PresharedSecret string
-	WorkerCount     int
+	Members     map[int]*Worker
+	Transformer encrypt.Transformer
+	WorkerCount int
 }
 
 type Worker struct {
 	Id                       int
 	Registered               bool
-	PresharedSecret          string
+	Transformer              encrypt.Transformer
 	SessionAuthenticationKey string
 	Verification             *ClientTest
 }
@@ -64,13 +66,18 @@ type Event struct {
 	Time   int64
 }
 
+func GenerateSecret() (string, error) {
+	return encrypt.GenerateAESKey(encrypt.AES256Bits)
+}
+
 func NewServer(Secret string) (*WorkServer, error) {
-	if len(Secret) != 32 {
-		return &WorkServer{}, errors.New("Secret must be 32 characters")
+	transformer, err := encrypt.NewAESTransformer(Secret)
+	if err != nil {
+		return &WorkServer{}, err
 	}
 	Queue := lane.NewQueue()
 	WorkerMembers := make(map[int]*Worker)
-	Workers := &WorkersStruct{WorkerMembers, Secret, 0}
+	Workers := &WorkersStruct{WorkerMembers, transformer, 0}
 	HandlerFuncs := make(map[string]interface{})
 	HandlerParams := make(map[string]interface{})
 	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
@@ -165,7 +172,7 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 		ws.Event("worker_verify_error", &Event{Error: "StrconvError", Time: time.Now().UTC().Unix()})
 		return "", errors.New("Failed to convert Worker ID string to int:" + err.Error())
 	} else {
-		ClientResp, err := decrypt([]byte(wrs.PresharedSecret), []byte(Response))
+		ClientResp, err := wrs.Transformer.Decrypt([]byte(Response))
 		if err != nil {
 			ws.Event("worker_verify_error", &Event{Error: "DecryptionError", Time: time.Now().UTC().Unix()})
 			return "", errors.New("Failed to decrypt worker verification string:" + err.Error())
@@ -188,17 +195,18 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 
 func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
 	wrk := &Worker{}
-	if len(Secret) != 32 {
-		return wrk, errors.New("Secret must be 32 characters")
+	transformer, err := encrypt.NewAESTransformer(Secret)
+	if err != nil {
+		return wrk, err
 	}
-	wrk.PresharedSecret = Secret
+	wrk.Transformer = transformer
 	wrk.Verification = &ClientTest{PlaintextVerification: PlaintextVerification}
 	IdInt, err := strconv.Atoi(ID)
 	if err != nil {
 		return &Worker{}, errors.New("Failed to convert Worker ID string to int:" + err.Error())
 	} else {
 		wrk.Id = IdInt
-		ClientResponse, err := encrypt([]byte(wrk.PresharedSecret), []byte(wrk.Verification.PlaintextVerification))
+		ClientResponse, err := wrk.Transformer.Encrypt([]byte(wrk.Verification.PlaintextVerification))
 		if err != nil {
 			return &Worker{}, errors.New("Failed to encrypt verification string:" + err.Error())
 		} else {
