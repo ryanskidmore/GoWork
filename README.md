@@ -25,6 +25,8 @@ Generate a secret:,
 ```go
 secret, err := gowork.GenerateSecret()
 ```
+Alternatively, use any string of length 32.
+
 Then create a new work server,
 ```go
 ws, err := gowork.NewServer(secret)

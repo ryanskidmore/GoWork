@@ -3,6 +3,7 @@ package gowork
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -67,11 +68,19 @@ type Event struct {
 }
 
 func GenerateSecret() (string, error) {
-	return encrypt.GenerateAESKey(encrypt.AES256Bits)
+	encodedSecret, err := encrypt.GenerateAESKey(encrypt.AES256Bits)
+	if err != nil {
+		return "", err
+	}
+	secret, err := encrypt.DecodeString(encodedSecret)
+	if err != nil {
+		return "", err
+	}
+	return string(secret), nil
 }
 
 func NewServer(Secret string) (*WorkServer, error) {
-	transformer, err := encrypt.NewAESTransformer(Secret)
+	transformer, err := newTransformer(Secret)
 	if err != nil {
 		return &WorkServer{}, err
 	}
@@ -195,7 +204,7 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 
 func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
 	wrk := &Worker{}
-	transformer, err := encrypt.NewAESTransformer(Secret)
+	transformer, err := newTransformer(Secret)
 	if err != nil {
 		return wrk, err
 	}
@@ -276,4 +285,11 @@ func Unmarshal(w string) *Work {
 	WorkObject := &Work{}
 	_ = json.Unmarshal([]byte(w), &WorkObject)
 	return WorkObject
+}
+
+func newTransformer(secret string) (encrypt.Transformer, error) {
+	if len(secret) != 32 {
+		return nil, fmt.Errorf("length of secret must be 32, length was %d", len(secret))
+	}
+	return encrypt.NewAESTransformer(encrypt.EncodeToString([]byte(secret)))
 }
