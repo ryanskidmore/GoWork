@@ -6,7 +6,9 @@ import (
 )
 
 const (
-	ERROR_MSG string = "AHH ERROR HAPPENED"
+	ERROR_MSG          string = "AHH ERROR HAPPENED"
+	SECRET_STR_INVALID string = "GoWork"
+	SECRET_STR_VALID   string = "GoWorkGoWorkGoWorkGoWorkGoWork12"
 )
 
 func TestNewEventError(t *testing.T) {
@@ -50,4 +52,46 @@ func TestNewEventWorker(t *testing.T) {
 	if ofType != "*gowork.Event" {
 		t.Fatalf("Expected type of *Event, received %s instead.", ofType)
 	}
+}
+
+func TestNewServer(t *testing.T) {
+	var (
+		err error
+	)
+
+	if _, err = NewServer(SECRET_STR_VALID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewServerInvalidSecretSize(t *testing.T) {
+	var (
+		err error
+	)
+
+	if _, err = NewServer(SECRET_STR_INVALID); err == nil {
+		t.Fatalf("Expected NewServer to throw a secret length error.  Secret %s was passed in.", SECRET_STR_INVALID)
+	}
+}
+
+func TestMustNewServer(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("TestMustNewServer paniced when it shouldn't have. Recovered %v", r)
+		}
+	}()
+
+	MustNewServer(SECRET_STR_VALID)
+}
+
+func TestMustNewServerPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			return
+		} else {
+			t.Fatalf("TestMustNewServer did not panic when it should have. Secret %s was passed in.", SECRET_STR_INVALID)
+		}
+	}()
+
+	MustNewServer(SECRET_STR_INVALID)
 }
