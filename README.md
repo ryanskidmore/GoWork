@@ -1,5 +1,7 @@
 # GoWork
 
+[![GoDoc](https://godoc.org/github.com/ryanskidmore/GoWork?status.svg)](https://godoc.org/github.com/ryanskidmore/GoWork)
+
 GoWork is a library for the encapsulation and delivery of Work to a distributed set of Workers.
 
 ## Installation
