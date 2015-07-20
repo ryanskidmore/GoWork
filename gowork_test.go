@@ -164,3 +164,13 @@ func TestAddParams(t *testing.T) {
 		t.Fatal("AddParams failed to set HandlerParams properly.")
 	}
 }
+
+func TestQueueSize(t *testing.T) {
+	var (
+		ws *WorkServer = MustNewServer(SECRET_STR_VALID)
+	)
+
+	if ws.QueueSize() != ws.Queue.Size() {
+		t.Fatalf("Expected QueueSize to return %d, it returned %d instead.", ws.Queue.Size(), ws.QueueSize())
+	}
+}
