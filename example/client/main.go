@@ -22,4 +22,6 @@ func main() {
 	}
 	worker = worker.SetAuthenticationKey(testresponse.String())
 	fmt.Println(worker.SessionAuthenticationKey)
+	testresponse, err = grequests.Post("http://127.0.0.1:3000/get_work", &grequests.RequestOptions{Params: map[string]string{"id": id, "sessionauthkey": worker.SessionAuthenticationKey}})
+	fmt.Println(testresponse.String())
 }
