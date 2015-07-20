@@ -7,6 +7,7 @@ import (
 
 const (
 	ERROR_MSG          string = "AHH ERROR HAPPENED"
+	EVENT_ID           string = "123abc"
 	SECRET_STR_INVALID string = "GoWork"
 	SECRET_STR_VALID   string = "GoWorkGoWorkGoWorkGoWorkGoWork12"
 )
@@ -106,4 +107,38 @@ func TestMustNewServerPanics(t *testing.T) {
 
 	t.Parallel()
 	MustNewServer(SECRET_STR_INVALID)
+}
+
+func TestNewHandler(t *testing.T) {
+	var (
+		err error
+		ws  *WorkServer = MustNewServer(SECRET_STR_VALID)
+	)
+
+	t.Parallel()
+
+	if err = ws.NewHandler(EVENT_ID, func(*Event, map[string]interface{}) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := ws.Handlers[EVENT_ID]; !ok {
+		t.Fatalf("Expected event_id %s to be set as a handler, it was not", EVENT_ID)
+	}
+}
+
+func TestNewHandlerAlreadyExists(t *testing.T) {
+	var (
+		err error
+		ws  *WorkServer = MustNewServer(SECRET_STR_VALID)
+	)
+
+	t.Parallel()
+
+	if err = ws.NewHandler(EVENT_ID, func(*Event, map[string]interface{}) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = ws.NewHandler(EVENT_ID, func(*Event, map[string]interface{}) {}); err == nil {
+		t.Fatalf("Expected NewHandler to throw a 'Handler already exists' error.  Event ID %s was passed in.", EVENT_ID)
+	}
 }
