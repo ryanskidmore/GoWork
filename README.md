@@ -58,7 +58,7 @@ The work is able to be retrieved then by calling the function `Get`
 ```go
 w, err := ws.Get("Worker ID", "Worker Authentication String")
 ```
-The Worker ID and Authentication String are provided to the worker by functions below in the Workers section. 
+The Worker ID and Authentication String are provided to the worker by functions below in the Workers section.
 
 This function will return an error when:-
 
