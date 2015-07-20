@@ -19,6 +19,8 @@ func TestDecrypt(t *testing.T) {
 		buffKey, buffText bytes.Buffer
 	)
 
+	t.Parallel()
+
 	if _, err = buffKey.WriteString(ENCRYPT_KEY_VALID); err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +39,8 @@ func TestDecryptInvalidKeySize(t *testing.T) {
 		err               error
 		buffKey, buffText bytes.Buffer
 	)
+
+	t.Parallel()
 
 	if _, err = buffKey.WriteString(ENCRYPT_KEY_INVALID); err != nil {
 		t.Fatal(err)
@@ -57,6 +61,8 @@ func TestEncrypt(t *testing.T) {
 		buffKey, buffText bytes.Buffer
 	)
 
+	t.Parallel()
+
 	if _, err = buffKey.WriteString(ENCRYPT_KEY_VALID); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +81,8 @@ func TestEncryptInvalidKeySize(t *testing.T) {
 		err               error
 		buffKey, buffText bytes.Buffer
 	)
+
+	t.Parallel()
 
 	if _, err = buffKey.WriteString(ENCRYPT_KEY_INVALID); err != nil {
 		t.Fatal(err)

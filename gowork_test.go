@@ -16,6 +16,8 @@ func TestNewEventError(t *testing.T) {
 		ofType string
 	)
 
+	t.Parallel()
+
 	e := NewEventError(ERROR_MSG)
 	ofType = reflect.TypeOf(e).String()
 
@@ -33,6 +35,8 @@ func TestNewEventWork(t *testing.T) {
 		ofType string
 	)
 
+	t.Parallel()
+
 	w := NewEventWork(&Work{})
 	ofType = reflect.TypeOf(w).String()
 
@@ -45,6 +49,8 @@ func TestNewEventWorker(t *testing.T) {
 	var (
 		ofType string
 	)
+
+	t.Parallel()
 
 	w := NewEventWorker(&Worker{})
 	ofType = reflect.TypeOf(w).String()
@@ -59,6 +65,8 @@ func TestNewServer(t *testing.T) {
 		err error
 	)
 
+	t.Parallel()
+
 	if _, err = NewServer(SECRET_STR_VALID); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +76,8 @@ func TestNewServerInvalidSecretSize(t *testing.T) {
 	var (
 		err error
 	)
+
+	t.Parallel()
 
 	if _, err = NewServer(SECRET_STR_INVALID); err == nil {
 		t.Fatalf("Expected NewServer to throw a secret length error.  Secret %s was passed in.", SECRET_STR_INVALID)
@@ -81,6 +91,7 @@ func TestMustNewServer(t *testing.T) {
 		}
 	}()
 
+	t.Parallel()
 	MustNewServer(SECRET_STR_VALID)
 }
 
@@ -93,5 +104,6 @@ func TestMustNewServerPanics(t *testing.T) {
 		}
 	}()
 
+	t.Parallel()
 	MustNewServer(SECRET_STR_INVALID)
 }
