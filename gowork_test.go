@@ -142,3 +142,25 @@ func TestNewHandlerAlreadyExists(t *testing.T) {
 		t.Fatalf("Expected NewHandler to throw a 'Handler already exists' error.  Event ID %s was passed in.", EVENT_ID)
 	}
 }
+
+func TestAddParams(t *testing.T) {
+	var (
+		ws     *WorkServer            = MustNewServer(SECRET_STR_VALID)
+		params map[string]interface{} = map[string]interface{}{
+			"key":  "value",
+			"key2": 12,
+		}
+	)
+
+	t.Parallel()
+
+	ws = ws.AddParams(params)
+
+	if ws.HandlerParams["key"].(string) != "value" {
+		t.Fatal("AddParams failed to set HandlerParams properly.")
+	}
+
+	if ws.HandlerParams["key2"].(int) != 12 {
+		t.Fatal("AddParams failed to set HandlerParams properly.")
+	}
+}
