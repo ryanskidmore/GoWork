@@ -68,15 +68,15 @@ type Event struct {
 }
 
 func GenerateSecret() (string, error) {
-	encodedSecret, err := encrypt.GenerateAESKey(encrypt.AES256Bits)
+	EncodedSecret, err := encrypt.GenerateAESKey(encrypt.AES256Bits)
 	if err != nil {
 		return "", err
 	}
-	secret, err := encrypt.DecodeString(encodedSecret)
+	Secret, err := encrypt.DecodeString(EncodedSecret)
 	if err != nil {
 		return "", err
 	}
-	return string(secret), nil
+	return string(Secret), nil
 }
 
 func NewEventError(msg string) *Event {
@@ -92,23 +92,21 @@ func NewEventWorker(w *Worker) *Event {
 }
 
 func NewServer(Secret string) (*WorkServer, error) {
-	transformer, err := newTransformer(Secret)
+	Transformer, err := NewTransformer(Secret)
 	if err != nil {
 		return &WorkServer{}, err
 	}
-	Queue := lane.NewQueue()
-	WorkerMembers := make(map[int]*Worker)
-	Workers := &WorkersStruct{WorkerMembers, transformer, 0}
-	HandlerFuncs := make(map[string]func(*Event, map[string]interface{}))
-	HandlerParams := make(map[string]interface{})
-	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
-	return WorkServerInst, nil
+	return NewServerInit(Transformer), nil
 }
 
 func MustNewServer(Secret string) *WorkServer {
+	return NewServerInit(MustNewTransformer(Secret))
+}
+
+func NewServerInit(Transformer encrypt.Transformer) *WorkServer {
 	Queue := lane.NewQueue()
 	WorkerMembers := make(map[int]*Worker)
-	Workers := &WorkersStruct{WorkerMembers, mustNewTransformer(Secret), 0}
+	Workers := &WorkersStruct{WorkerMembers, Transformer, 0}
 	HandlerFuncs := make(map[string]func(*Event, map[string]interface{}))
 	HandlerParams := make(map[string]interface{})
 	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
@@ -216,11 +214,11 @@ func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (str
 
 func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker, error) {
 	wrk := &Worker{}
-	transformer, err := newTransformer(Secret)
+	Transformer, err := NewTransformer(Secret)
 	if err != nil {
 		return wrk, err
 	}
-	wrk.Transformer = transformer
+	wrk.Transformer = Transformer
 	wrk.Verification = &ClientTest{PlaintextVerification: PlaintextVerification}
 	IdInt, err := strconv.Atoi(ID)
 	if err != nil {
@@ -293,17 +291,17 @@ func Unmarshal(w string) *Work {
 	return WorkObject
 }
 
-func newTransformer(secret string) (encrypt.Transformer, error) {
-	if len(secret) != 32 {
-		return nil, fmt.Errorf("length of secret must be 32, length was %d", len(secret))
+func NewTransformer(Secret string) (encrypt.Transformer, error) {
+	if len(Secret) != 32 {
+		return nil, fmt.Errorf("Length of secret must be 32, length was %d", len(Secret))
 	}
-	return encrypt.NewAESTransformer(encrypt.EncodeToString([]byte(secret)))
+	return encrypt.NewAESTransformer(encrypt.EncodeToString([]byte(Secret)))
 }
 
-func mustNewTransformer(secret string) encrypt.Transformer {
-	transformer, err := newTransformer(secret)
+func MustNewTransformer(Secret string) encrypt.Transformer {
+	Transformer, err := NewTransformer(Secret)
 	if err != nil {
 		panic(err.Error())
 	}
-	return transformer
+	return Transformer
 }
