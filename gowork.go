@@ -106,12 +106,9 @@ func NewServer(Secret string) (*WorkServer, error) {
 }
 
 func MustNewServer(Secret string) *WorkServer {
-	if len(Secret) != 32 {
-		panic("Secret must be 32 characters")
-	}
 	Queue := lane.NewQueue()
 	WorkerMembers := make(map[int]*Worker)
-	Workers := &WorkersStruct{WorkerMembers, Secret, 0}
+	Workers := &WorkersStruct{WorkerMembers, mustNewTransformer(Secret), 0}
 	HandlerFuncs := make(map[string]func(*Event, map[string]interface{}))
 	HandlerParams := make(map[string]interface{})
 	WorkServerInst := &WorkServer{Queue, HandlerFuncs, HandlerParams, Workers}
@@ -301,4 +298,12 @@ func newTransformer(secret string) (encrypt.Transformer, error) {
 		return nil, fmt.Errorf("length of secret must be 32, length was %d", len(secret))
 	}
 	return encrypt.NewAESTransformer(encrypt.EncodeToString([]byte(secret)))
+}
+
+func mustNewTransformer(secret string) encrypt.Transformer {
+	transformer, err := newTransformer(secret)
+	if err != nil {
+		panic(err.Error())
+	}
+	return transformer
 }

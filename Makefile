@@ -34,24 +34,24 @@ build: deps
 install: deps
 	go install ./...
 
-lint: testdeps
+lint: test-deps
 	go get -v github.com/golang/lint/golint
 	golint ./.
 
-vet: testdeps
+vet: test-deps
 	go get -v golang.org/x/tools/cmd/vet
 	go vet ./...
 
-errcheck: testdeps
+errcheck: test-deps
 	go get -v github.com/kisielk/errcheck
 	errcheck ./...
 
 pretest: lint vet errcheck
 
-test: testdeps pretest
+test: test-deps pretest
 	go test -test.v ./...
 
-cov: testdeps
+cov: test-deps
 	go get -v github.com/axw/gocov/gocov
 	go get golang.org/x/tools/cmd/cover
 	gocov test | gocov report
