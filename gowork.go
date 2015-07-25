@@ -113,7 +113,7 @@ func NewServerInit(Transformer encrypt.Transformer) *WorkServer {
 	return WorkServerInst
 }
 
-func (ws WorkServer) NewHandler(event_id string, hf func(*Event, map[string]interface{})) error {
+func (ws *WorkServer) NewHandler(event_id string, hf func(*Event, map[string]interface{})) error {
 	if _, exists := ws.Handlers[event_id]; exists {
 		ws.Event("add_handler_error", NewEventError("HandlerExists"))
 		return errors.New("Handler already exists")
@@ -122,24 +122,24 @@ func (ws WorkServer) NewHandler(event_id string, hf func(*Event, map[string]inte
 	return nil
 }
 
-func (ws WorkServer) AddParams(params map[string]interface{}) *WorkServer {
+func (ws *WorkServer) AddParams(params map[string]interface{}) *WorkServer {
 	ws.HandlerParams = params
-	return &ws
+	return ws
 }
 
-func (ws WorkServer) Event(event_id string, event *Event) {
+func (ws *WorkServer) Event(event_id string, event *Event) {
 	if handlerFunc, exists := ws.Handlers[event_id]; exists {
 		handlerFunc(event, ws.HandlerParams)
 	}
 }
 
-func (ws WorkServer) Add(w *Work) {
+func (ws *WorkServer) Add(w *Work) {
 	w.Time.Added = time.Now().UTC().Unix()
 	ws.Event("add_work", NewEventWork(w))
 	ws.Queue.Enqueue(w)
 }
 
-func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
+func (ws *WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 	IdInt, err := strconv.Atoi(Id)
 	if err != nil {
 		ws.Event("get_work_error", NewEventError("StrconvError"))
@@ -162,7 +162,7 @@ func (ws WorkServer) Get(Id string, AuthenticationKey string) (*Work, error) {
 	return WorkObj.(*Work), errors.New("Work Timeout")
 }
 
-func (ws WorkServer) Submit(w *Work) {
+func (ws *WorkServer) Submit(w *Work) {
 	if (w.Time.Added + w.Time.Timeout) <= time.Now().UTC().Unix() {
 		w.Result.Error = "Timeout"
 		w.Result.Status = "Timeout"
@@ -173,11 +173,11 @@ func (ws WorkServer) Submit(w *Work) {
 	ws.Event("work_complete", NewEventWork(w))
 }
 
-func (ws WorkServer) QueueSize() int {
+func (ws *WorkServer) QueueSize() int {
 	return ws.Queue.Size()
 }
 
-func (wrs WorkersStruct) Register(ws *WorkServer) (string, string) {
+func (wrs *WorkersStruct) Register(ws *WorkServer) (string, string) {
 	TempWC := wrs.WorkerCount
 	wrs.WorkerCount += 1
 	w := &Worker{
@@ -190,7 +190,7 @@ func (wrs WorkersStruct) Register(ws *WorkServer) (string, string) {
 	return strconv.Itoa(w.Id), w.Verification.PlaintextVerification
 }
 
-func (wrs WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (string, error) {
+func (wrs *WorkersStruct) Verify(ws *WorkServer, Id string, Response string) (string, error) {
 	IdInt, err := strconv.Atoi(Id)
 	if err != nil {
 		ws.Event("worker_verify_error", NewEventError("StrconvError"))
@@ -233,12 +233,12 @@ func NewWorker(Secret string, ID string, PlaintextVerification string) (*Worker,
 	return wrk, nil
 }
 
-func (wrk Worker) SetAuthenticationKey(key string) *Worker {
+func (wrk *Worker) SetAuthenticationKey(key string) *Worker {
 	wrk.SessionAuthenticationKey = key
-	return &wrk
+	return wrk
 }
 
-func (wrk Worker) Process(w *Work) (*Work, map[string]interface{}, error) {
+func (wrk *Worker) Process(w *Work) (*Work, map[string]interface{}, error) {
 	WorkParams := make(map[string]interface{})
 	if (w.Time.Added + w.Time.Timeout) <= time.Now().UTC().Unix() {
 		return w, WorkParams, errors.New("Work Timeout")
@@ -251,7 +251,7 @@ func (wrk Worker) Process(w *Work) (*Work, map[string]interface{}, error) {
 	return w, WorkParams, nil
 }
 
-func (wrk Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error) {
+func (wrk *Worker) Submit(w *Work, ResultJSON string, Error string) (*Work, error) {
 	wr := &WorkResult{}
 	wr.ResultJSON = ResultJSON
 	w.Time.Complete = time.Now().UTC().Unix()
@@ -280,7 +280,7 @@ func CreateWork(WorkData interface{}, Timeout int64) (*Work, error) {
 	return NewWork, nil
 }
 
-func (w Work) Marshal() string {
+func (w *Work) Marshal() string {
 	MarshalledWork, _ := json.Marshal(w)
 	return string(MarshalledWork)
 }
