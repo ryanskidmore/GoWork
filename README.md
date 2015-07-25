@@ -1,5 +1,7 @@
 # GoWork
 
+[![GoDoc](https://godoc.org/github.com/ryanskidmore/GoWork?status.svg)](https://godoc.org/github.com/ryanskidmore/GoWork)
+
 GoWork is a library for the encapsulation and delivery of Work to a distributed set of Workers.
 
 ## Installation
@@ -25,7 +27,7 @@ Generate a secret:,
 ```go
 secret, err := gowork.GenerateSecret()
 ```
-Alternatively, use any string of length 32.
+ Error is returned when the secret isn't exactly 32 characters long.
 
 Then create a new work server,
 ```go
@@ -60,7 +62,7 @@ The work is able to be retrieved then by calling the function `Get`
 ```go
 w, err := ws.Get("Worker ID", "Worker Authentication String")
 ```
-The Worker ID and Authentication String are provided to the worker by functions below in the Workers section. 
+The Worker ID and Authentication String are provided to the worker by functions below in the Workers section.
 
 This function will return an error when:-
 
