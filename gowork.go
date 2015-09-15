@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/oleiade/lane"
-	"github.com/peter-edge/go-encrypt"
 	"github.com/satori/go.uuid"
+	"go.pedge.io/encrypt"
 	"gopkg.in/mgo.v2/bson"
 )
 
